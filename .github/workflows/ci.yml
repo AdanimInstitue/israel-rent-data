@@ -1,10 +1,36 @@
 name: ci
 
+# Draft-first cost control.
+#
+# `ready_for_review` is mandatory in the types list below: it is not one of the
+# default `pull_request` types, and omitting it strands a ready-marked PR with
+# no validation run at all.
+#
+# This workflow is `pull_request`-only and deliberately stays that way. No
+# `schedule:`/cron trigger is added here: this repository recorded zero GitHub
+# Actions runs in August 2026, so there is no measurement to justify swapping
+# triggers and nothing to save by doing so. Note also that if `cache: pip` is
+# ever enabled below, default-branch runs are the only ones that write the
+# `refs/heads/main` cache every branch can restore -- caches written by
+# `pull_request` runs are scoped to `refs/pull/N/merge` and are invisible
+# elsewhere, and GitHub evicts caches after 7 days without access.
+# Revisit when this repo has real run data.
 on:
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   validate:
+    # Skip every job on draft PRs; a skipped job is free and reports "skipped".
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     env:
       COVERAGE_FILE: .coverage
@@ -52,7 +78,11 @@ jobs:
 
   pr-agent-context:
     name: pr-agent-context
-    if: ${{ always() }}
+    # `always()` exists so this job still reports when `validate` fails. The
+    # added draft clause is required on top of it: without it, `always()` would
+    # keep this job running on a draft PR *after* its dependency was skipped,
+    # with nothing to collect.
+    if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     needs: [validate]
     permissions:
       contents: read
